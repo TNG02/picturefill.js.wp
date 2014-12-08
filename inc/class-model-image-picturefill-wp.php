@@ -218,17 +218,60 @@ if(!class_exists('Model_Image_Picturefill_WP')){
       }
     }
 
+	/**
+	 * strips the base URL from a url
+	 * 
+	 * with a url of 'http://my_site.com/wp-content/uploads/2014/12/my_image.jpg' and a base url of 
+	 * 'http://my_site.com/wp-content/uploads/' it should return '2014/12/my_image.jpg'.
+	 * 
+	 * @param	string	$url	the full url (including file details)
+	 * @param	string	$baseurl	the part of the url to strip off
+	 * 
+	 * @return	string	the trailing portion of the url that comes after the base url 
+	 */
+	public static function strip_baseurl($url, $baseurl)	{
+		$result = $url;
+		$position = strrpos($url, $baseurl);
+		if (!is_bool($position)) { // strrpos can return 0 if the baseurl is the first section of the url and false if it isn't there
+			$result = substr($url, $position + strlen($baseurl));	
+		}
+		return $result;
+	}
+	
+	/**
+	 * Obtains the Wordpress ID from the wp_posts table that is associated with an URL
+	 * 
+	 * @param	string	$url	the url for which the ID is required
+	 * 
+	 * @return	string	the ID for the specified URL
+	 */
+	public static function id_from_url($url) {
+		$prefix = Picturefill_WP::$wpdb->prefix;
+		$upload_dir = wp_upload_dir();
+		$baseurl = $upload_dir['baseurl'] . '/';
+		// strip out the uploads folder's baseurl from the url to just return the path to the file e.g. if the base url is
+		// 'http...my_domain.com/uploads' and the url is http...my_domain.com/uploads/2014/11/my_image.jpg' it will grab the '2014/11/my_image.jpg' portion.
+		$url = static::strip_baseurl($url, $baseurl);
+		
+		// the following commented cpde also works but I it is a less efficient query and is not as safe (AFAICT)
+		// $result = Picturefill_WP::$wpdb->get_col(Picturefill_WP::$wpdb->prepare("SELECT ID FROM " . $prefix . "posts" . " WHERE guid like '%s';", '%' . $url ));
+		$result = Picturefill_WP::$wpdb->get_col(Picturefill_WP::$wpdb->prepare("SELECT Post_ID FROM " . $prefix . "postmeta" . " WHERE meta_key = '_wp_attached_file' and meta_value='%s';", $url ));
+		return $result;
+	}
+		
     private function url_to_attachment_id($image_url){
       $original_image_url = $image_url;
       $image_url = preg_replace('/^(.+?)(-\d+x\d+)?\.(' . implode('|', $this->application_model->get_allowed_image_extensions()) . ')((?:\?|#).+)?$/i', '$1.$3', $image_url);
-      $prefix = Picturefill_WP::$wpdb->prefix;
-      $attachment_id = Picturefill_WP::$wpdb->get_col(Picturefill_WP::$wpdb->prepare("SELECT ID FROM " . $prefix . "posts" . " WHERE guid='%s';", $image_url ));
-      if(!empty($attachment_id)){
-        return $attachment_id[0];
-      }else{
-        $attachment_id = Picturefill_WP::$wpdb->get_col(Picturefill_WP::$wpdb->prepare("SELECT ID FROM " . $prefix . "posts" . " WHERE guid='%s';", $original_image_url ));
-      }
-      return !empty($attachment_id) ? $attachment_id[0] : false;
-    }
+	  
+	  $attachment_id = static::id_from_url($image_url);
+	  if (empty($attachment_id)) {
+	  	  // if the current URL doesn't map to a wp_posts entry try the unaltered URL 
+		  $attachment_id = static::id_from_url($original_image_url);
+		  if (empty($attachment_id)) {
+		  	$attachment_id = false;
+		  }
+	  }
+	  return $attachment_id[0];
+	}
   }
 }
